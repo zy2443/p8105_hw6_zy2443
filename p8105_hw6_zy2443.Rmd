@@ -10,6 +10,8 @@ library(readxl)
 library(patchwork)
 library(ggplot2)
 library(modelr)
+library(p8105.datasets)
+library(mgcv)
 
 knitr::opts_chunk$set(
 	echo = TRUE,
@@ -180,12 +182,107 @@ cv_birthweight %>%
 ```
 
 
+##Problem 3
 
+Load data
+```{r noaa, cache=T}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
 
+Data distribution. According to graph, points have linear distribution.
+```{r}
+weather_df %>%
+  ggplot(aes(x = tmin, y = tmax)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm")
+```
 
+5000 boostrap samples
+```{r}
+set.seed(1)
+bootsamples =
+  weather_df %>% 
+  bootstrap(n = 5000, id = "strap_number") %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x)),
+    results_tidy = map(models, broom::tidy),
+    results_glance = map(models, broom::glance)
+  ) %>% 
+  unnest(results_tidy, results_glance) %>% 
+  select(strap_number, term, estimate, r_squared = r.squared)
+bootsamples
+```
 
+Distribution of r^2. The graph shows relatively normal distribution. Most values are distributed between 0.9 and 0.92 and are centered around 0.913. Majority of values are closed to 1.
+```{r}
+bootsamples %>% 
+  ggplot(aes(x = r_squared)) +
+  geom_density() +
+  labs(
+    title = "Distribution of r^2",
+    x = "r^2 value"
+  )
+```
 
+Log(beta0 * beta1)
+```{r}
+log =
+  bootsamples %>% 
+  select(strap_number, term, estimate) %>% 
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  ) %>% 
+  rename(intercept = `(Intercept)`) %>% 
+  mutate(
+    log_beta = log(intercept * tmin)
+  )
+```
 
+Distribution of log(beta0 * beta1). The graph shows relatively normal distribution. Most values are distributed between 1.975 and 2.05 and are centered around 2.01.
+```{r}
+log %>% 
+  ggplot(aes(x = log_beta)) +
+  geom_density() +
+  labs(
+    title = "Distribution of log(beta0 * beta1)",
+    x = "log(beta0 * beta1)"
+  )
+```
+
+Identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for r^2.
+The 95% CI for r^2 is (0.894, 0.927).
+```{r}
+bootsamples %>% 
+  distinct(strap_number, r_squared) %>% 
+  summarize(
+    lower = quantile(r_squared, 0.025),
+    upper = quantile(r_squared, 0.975)
+  ) %>% 
+  knitr::kable()
+```
+
+Identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval for log(beta0 * beta1).
+The 95% CI for log(beta0 * beta1) is (1.97, 2.06).
+```{r}
+log %>% 
+  distinct(strap_number, log_beta) %>% 
+  summarize(
+    lower = quantile(log_beta, 0.025),
+    upper = quantile(log_beta, 0.975)
+  ) %>% 
+  knitr::kable()
+```
 
 
 
